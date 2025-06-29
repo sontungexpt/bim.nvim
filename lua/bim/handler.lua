@@ -19,6 +19,24 @@ local function reset()
 	end
 end
 
+local function execute_command(cmd)
+	if cmd.expr and type(cmd.value) == "function" then
+		local ok, result = pcall(cmd.value)
+		if ok and type(result) == "string" then
+			vim.api.nvim_input(result)
+		end
+	elseif cmd.type == "string" then
+		vim.api.nvim_input(cmd.value)
+	elseif cmd.type == "command" then
+		vim.cmd(cmd.value:sub(2)) -- remove ':'
+	elseif cmd.type == "function" then
+		local ok, result = pcall(cmd.value)
+		if ok and type(result) == "string" then
+			vim.api.nvim_input(result)
+		end
+	end
+end
+
 local function get_current_word()
 	local row, col = unpack(vim.api.nvim_win_get_cursor(0))
 	local line = vim.api.nvim_get_current_line()
@@ -47,7 +65,7 @@ function M.on_char(char)
 				vim.schedule(function()
 					local row = vim.api.nvim_win_get_cursor(0)[1]
 					vim.api.nvim_buf_set_text(0, row - 1, word_start, row - 1, word_end + 1, { "" })
-					vim.api.nvim_input(current_node.command)
+					execute_command(current_node.command)
 					reset()
 				end)
 			end)

@@ -1,8 +1,6 @@
+local type = type
 -- override.lua
 local M = {}
-local trie = require("bim.trie")
-
-local original_set = vim.keymap.set
 
 local function is_insert_mode(mode)
 	if type(mode) == "string" then
@@ -18,10 +16,25 @@ local function is_insert_mode(mode)
 end
 
 function M.wrap()
-	vim.keymap.set = function(mode, lhs, rhs, opts)
+	local trie = require("bim.trie")
+	local keymap = vim.keymap
+	local original_set = keymap.set
+	local original_del = keymap.del
+
+	---@diagnostic disable-next-line: duplicate-set-field
+	keymap.set = function(mode, lhs, rhs, opts)
 		original_set(mode, lhs, rhs, opts)
+
 		if is_insert_mode(mode) and lhs:match("^%w+$") then
-			trie.insert_mapping(lhs, rhs)
+			trie.insert_mapping(lhs, rhs, opts)
+		end
+	end
+
+	---@diagnostic disable-next-line: duplicate-set-field
+	keymap.del = function(mode, lhs, opts)
+		original_del(mode, lhs, opts)
+		if is_insert_mode(mode) and lhs:match("^%w+$") then
+			trie.remove_mapping(lhs)
 		end
 	end
 end
