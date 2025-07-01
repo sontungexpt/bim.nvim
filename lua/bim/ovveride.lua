@@ -1,4 +1,7 @@
+local api = vim.api
 local type = type
+local nvim_set_keymap = api.nvim_set_keymap
+local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 -- override.lua
 local M = {}
 
@@ -24,38 +27,50 @@ function M.wrap()
 
 	---@diagnostic disable-next-line: duplicate-set-field
 	keymap.set = function(mode, lhs, rhs, opts)
-		-- original_set(mode, lhs, rhs, opts)
-		if is_insert_mode(mode) then
-			if opts.expr and opts.replace_keycodes ~= false then
-				opts.replace_keycodes = true
-			end
+		---@cast mode string[]
+		mode = type(mode) == "string" and { mode } or mode
 
-			if opts.remap == nil then
-				-- default remap value is false
-				opts.noremap = true
-			else
-				-- remaps behavior is opposite of noremap option.
-				opts.noremap = not opts.remap
-				opts.remap = nil ---@type boolean?
-			end
+		if opts.expr and opts.replace_keycodes ~= false then
+			opts.replace_keycodes = true
+		end
 
-			if type(rhs) == "function" then
-				opts.callback = rhs
-				rhs = ""
-			end
+		if opts.remap == nil then
+			-- default remap value is false
+			opts.noremap = true
+		else
+			-- remaps behavior is opposite of noremap option.
+			opts.noremap = not opts.remap
+			opts.remap = nil ---@type boolean?
+		end
 
-			if opts.buffer then
-				--- unsupported now
-				-- local bufnr = opts.buffer == true and 0 or opts.buffer --[[@as integer]]
-				-- opts.buffer = nil ---@type integer?
-			else
-				opts.buffer = nil
-				trie.insert_mapping(lhs, rhs, opts)
+		if type(rhs) == "function" then
+			opts.callback = rhs
+			rhs = ""
+		end
+
+		if opts.buffer then
+			local bufnr = opts.buffer == true and 0 or opts.buffer --[[@as integer]]
+			opts.buffer = nil ---@type integer?
+			for _, m in ipairs(mode) do
+				if m == "i" and trie.insert_buf_imap(bufnr, lhs, rhs, opts) then
+					goto continue
+				end
+				nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
+				::continue::
+			end
+		else
+			opts.buffer = nil
+			for _, m in ipairs(mode) do
+				if m == "i" and trie.insert_imap(lhs, rhs, opts) then
+					goto continue
+				end
+				nvim_set_keymap(m, lhs, rhs, opts)
+				::continue::
 			end
 		end
 	end
 
-	---@diagnostic disable-next-line: duplicate-set-field
+	---@diagnostic disable-next-line: duplicate-set-field, unused-local
 	keymap.del = function(mode, lhs, opts)
 		-- original_del(mode, lhs, opts)
 		if is_insert_mode(mode) then

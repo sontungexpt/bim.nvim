@@ -39,7 +39,7 @@ end
 --- Execute the command associated with the current sequence
 --- @param cmd Command The command to execute_command
 local function execute_command(cmd)
-	local rhs, callback, opts, metadata = cmd.rhs, cmd.callback, cmd.opts, cmd.metadata
+	local rhs, callback, opts, metadata = cmd.rhs, cmd.callback, cmd.opts or {}, cmd.metadata or {}
 
 	local output = rhs
 	if callback then
@@ -52,12 +52,13 @@ local function execute_command(cmd)
 
 	if type(output) == "string" then
 		if opts.replace_keycodes then
-			if metadata.lhsraw then
-				output = metadata.lhsraw
+			local rhsraw = metadata.rhsraw
+			if rhsraw then
+				output = rhsraw
 			else
 				output = replace_termcodes(output, true, true, true)
 				-- cache the raw lhs for later use
-				metadata.lhsraw = output
+				metadata.rhsraw = output
 			end
 		end
 		nvim_input(output)

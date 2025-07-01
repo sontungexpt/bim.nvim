@@ -77,6 +77,17 @@ local Trie = {
 	--}
 }
 
+local TrieBuf = {
+	-- [bufnr] = {
+	--   ["a"] = {
+	--     ["b"] = {
+	--       command = ""
+	--     }
+	--     command = ""
+	--   }
+	-- }
+}
+
 local function to_boolean(value)
 	if value == nil then
 		return false
@@ -138,7 +149,7 @@ end
 --- @param rhs string|function? The right-hand side of the mapping, can be a function.
 --- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
 --- @return boolean True if the mapping was successfully inserted, false if the lhs is invalid.
-local function insert_i_mapping(lhs, rhs, opts, metadata, default_deleted)
+local function insert_imap(lhs, rhs, opts, metadata, default_deleted)
 	local cb = nil
 	local type_rhs = type(rhs)
 	if type_rhs == "function" then
@@ -177,13 +188,59 @@ local function insert_i_mapping(lhs, rhs, opts, metadata, default_deleted)
 
 	return true
 end
-M.insert_mapping = insert_i_mapping
+
+M.insert_imap = insert_imap
+
+local function insert_buf_imap(bufnr, lhs, rhs, opts, metadata)
+	if not bufnr or type(bufnr) ~= "number" then
+		return false
+	end
+
+	local cb = nil
+	local type_rhs = type(rhs)
+	if type_rhs == "function" then
+		cb = rhs
+		rhs = nil
+	elseif type_rhs ~= "string" then
+		return false
+	end
+
+	local analyzed_lhs = analyze_lhs(lhs)
+	if not analyzed_lhs then
+		return false
+	end
+
+	local node = TrieBuf[bufnr]
+	if not node then
+		node = {}
+		TrieBuf[bufnr] = node
+	end
+
+	for i = 1, #analyzed_lhs do
+		local ch = analyzed_lhs:sub(i, i)
+		node[ch] = node[ch] or {}
+		node = node[ch]
+	end
+
+	node.command = {
+		mode = "i",
+		callback = cb,
+		lhs = analyzed_lhs,
+		rhs = rhs,
+		opts = opts or {},
+		metadata = metadata or {},
+	}
+
+	return true
+end
+
+M.insert_buf_imap = insert_buf_imap
 
 function M.build_trie()
 	for _, map in ipairs(nvim_get_keymap("i")) do
 		local lhs, rhs = map.lhs, map.rhs or map.callback
 
-		insert_i_mapping(lhs, rhs, {
+		insert_imap(lhs, rhs, {
 			expr = to_boolean(map.expr),
 			noremap = to_boolean(map.noremap),
 			nowait = to_boolean(map.nowait),

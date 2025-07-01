@@ -3,10 +3,9 @@ local M = {}
 function M.setup()
 	local trie = require("bim.trie")
 	local handler = require("bim.handler")
-	local override = require("bim.override")
+	local override = require("bim.ovveride")
 
 	trie.build_trie()
-	-- vim.notify(vim.inspect(trie.get_trie()))
 	handler.setup()
 	override.wrap()
 end
