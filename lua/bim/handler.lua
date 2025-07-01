@@ -44,13 +44,16 @@ local function execute_command(cmd)
 	local output = rhs
 	if callback then
 		output = callback()
+		if not opts.expr then
+			return
+		end
 	end
 
 	if opts.expr and type(output) == "string" then
 		output = nvim_eval(output)
 	end
 
-	if type(output) == "string" then
+	if type(output) == "string" and output ~= "" then
 		if opts.replace_keycodes then
 			local rhsraw = metadata.rhsraw
 			if rhsraw then

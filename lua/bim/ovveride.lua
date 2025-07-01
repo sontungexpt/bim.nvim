@@ -22,6 +22,7 @@ end
 function M.wrap()
 	local trie = require("bim.trie")
 	local keymap = vim.keymap
+	local original_del = keymap.del
 	local nvim_set_keymap = api.nvim_set_keymap
 	local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 
@@ -54,14 +55,22 @@ function M.wrap()
 			local bufnr = opts.buffer == true and 0 or opts.buffer --[[@as integer]]
 			opts.buffer = nil ---@type integer?
 			for _, m in ipairs(mode) do
-				if m ~= "i" or not trie.buf_set_keymap(bufnr, lhs, rhs, opts) then
+				if m == "i" then
+					if not trie.buf_set_keymap(bufnr, lhs, rhs, opts) then
+						nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
+					end
+				else
 					nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
 				end
 			end
 		else
 			opts.buffer = nil
 			for _, m in ipairs(mode) do
-				if m ~= "i" or not trie.set_keymap(lhs, rhs, opts) then
+				if m == "i" then
+					if not trie.set_keymap(lhs, rhs, opts) then
+						nvim_set_keymap(m, lhs, rhs, opts)
+					end
+				else
 					nvim_set_keymap(m, lhs, rhs, opts)
 				end
 			end
@@ -71,9 +80,10 @@ function M.wrap()
 	---@diagnostic disable-next-line: duplicate-set-field, unused-local
 	keymap.del = function(mode, lhs, opts)
 		-- original_del(mode, lhs, opts)
-		if is_insert_mode(mode) then
-			trie.remove_mapping(lhs)
+		if is_insert_mode(mode) and trie.remove_mapping(lhs) then
+			return
 		end
+		original_del(mode, lhs, opts)
 	end
 end
 

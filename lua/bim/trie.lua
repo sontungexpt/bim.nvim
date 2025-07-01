@@ -172,12 +172,14 @@ local function set_keymap_from_node(node, lhs, rhs, opts, metadata)
 		node = node[ch]
 	end
 
+	opts = opts or {}
+
 	node.command = {
 		mode = "i",
-		callback = cb,
+		callback = cb or opts.callback,
 		lhs = analyzed_lhs,
 		rhs = rhs,
-		opts = opts or {},
+		opts = opts,
 		metadata = metadata or {},
 	}
 
@@ -280,11 +282,12 @@ end
 function M.remove_mapping(lhs)
 	lhs = analyze_lhs(lhs)
 	if not lhs then
-		return
+		return false
 	end
 
 	local path = {}
 	local node = Trie
+	local success = false
 
 	for i = 1, #lhs do
 		local ch = lhs:sub(i, i)
@@ -297,6 +300,7 @@ function M.remove_mapping(lhs)
 
 	-- remove the command if it exists
 	if node.command then
+		success = true
 		node.command = nil
 	end
 
@@ -310,6 +314,7 @@ function M.remove_mapping(lhs)
 			break
 		end
 	end
+	return success
 end
 
 function M.has_command(node)
