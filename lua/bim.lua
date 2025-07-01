@@ -7,7 +7,7 @@ function M.setup()
 
 	trie.build_trie()
 	handler.setup()
-	override.wrap()
+	-- override.wrap()
 end
 
 return M

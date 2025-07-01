@@ -1,7 +1,5 @@
 local api = vim.api
 local type = type
-local nvim_set_keymap = api.nvim_set_keymap
-local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 -- override.lua
 local M = {}
 
@@ -24,11 +22,15 @@ end
 function M.wrap()
 	local trie = require("bim.trie")
 	local keymap = vim.keymap
+	local nvim_set_keymap = api.nvim_set_keymap
+	local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 
 	---@diagnostic disable-next-line: duplicate-set-field
 	keymap.set = function(mode, lhs, rhs, opts)
 		---@cast mode string[]
 		mode = type(mode) == "string" and { mode } or mode
+
+		opts = vim.deepcopy(opts)
 
 		if opts.expr and opts.replace_keycodes ~= false then
 			opts.replace_keycodes = true
@@ -52,20 +54,16 @@ function M.wrap()
 			local bufnr = opts.buffer == true and 0 or opts.buffer --[[@as integer]]
 			opts.buffer = nil ---@type integer?
 			for _, m in ipairs(mode) do
-				if m == "i" and trie.insert_buf_imap(bufnr, lhs, rhs, opts) then
-					goto continue
+				if m ~= "i" or not trie.buf_set_keymap(bufnr, lhs, rhs, opts) then
+					nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
 				end
-				nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
-				::continue::
 			end
 		else
 			opts.buffer = nil
 			for _, m in ipairs(mode) do
-				if m == "i" and trie.insert_imap(lhs, rhs, opts) then
-					goto continue
+				if m ~= "i" or not trie.set_keymap(lhs, rhs, opts) then
+					nvim_set_keymap(m, lhs, rhs, opts)
 				end
-				nvim_set_keymap(m, lhs, rhs, opts)
-				::continue::
 			end
 		end
 	end

@@ -1,6 +1,6 @@
 local api = vim.api
-local nvim_del_keymap = api.nvim_del_keymap
-local nvim_get_keymap = api.nvim_get_keymap
+local nvim_del_keymap, nvim_buf_del_keymap = api.nvim_del_keymap, api.nvim_buf_del_keymap
+local nvim_get_keymap, nvim_buf_get_keymap = api.nvim_get_keymap, api.nvim_buf_get_keymap
 local ipairs, type, next = ipairs, type, next
 local tbl_concat = table.concat
 
@@ -143,125 +143,138 @@ local function analyze_lhs(lhs)
 	return lhs:match("^[%w%p ]+$")
 end
 
+--- Insert a mapping into the Trie from a node.
+--- If the mapping already exists, it will be overwritten.
+--- @param node TrieNode The node to insert the mapping into.
+--- @param lhs string? The left-hand side of the mapping.
+--- @param rhs string|function? The right-hand side of the mapping, can be a function.
+--- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
+--- @param metadata? table Metadata for the mapping, can include additional information.
+--- @return boolean True if the mapping was successfully inserted, false if the lhs is invalid.
+local function set_keymap_from_node(node, lhs, rhs, opts, metadata)
+	local cb = nil
+	local type_rhs = type(rhs)
+	if type_rhs == "function" then
+		cb = rhs
+		rhs = nil
+	elseif type_rhs ~= "string" then
+		return false
+	end
+
+	local analyzed_lhs = analyze_lhs(lhs)
+	if not analyzed_lhs then
+		return false
+	end
+
+	for i = 1, #analyzed_lhs do
+		local ch = analyzed_lhs:sub(i, i)
+		node[ch] = node[ch] or {}
+		node = node[ch]
+	end
+
+	node.command = {
+		mode = "i",
+		callback = cb,
+		lhs = analyzed_lhs,
+		rhs = rhs,
+		opts = opts or {},
+		metadata = metadata or {},
+	}
+
+	return true
+end
+
 --- Insert a mapping into the Trie.
 --- If the mapping already exists, it will be overwritten.
 --- @param lhs string? The left-hand side of the mapping.
 --- @param rhs string|function? The right-hand side of the mapping, can be a function.
 --- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
 --- @return boolean True if the mapping was successfully inserted, false if the lhs is invalid.
-local function insert_imap(lhs, rhs, opts, metadata, default_deleted)
-	local cb = nil
-	local type_rhs = type(rhs)
-	if type_rhs == "function" then
-		cb = rhs
-		rhs = nil
-	elseif type_rhs ~= "string" then
-		return false
-	end
-
-	local analyzed_lhs = analyze_lhs(lhs)
-	if not analyzed_lhs then
-		return false
-	end
-
-	local node = Trie
-
-	for i = 1, #analyzed_lhs do
-		local ch = analyzed_lhs:sub(i, i)
-		node[ch] = node[ch] or {}
-		node = node[ch]
-	end
-
-	node.command = {
-		mode = "i",
-		callback = cb,
-		lhs = analyzed_lhs,
-		rhs = rhs,
-		opts = opts or {},
-		metadata = metadata or {},
-	}
-
-	-- remove the mapping from nvim if it exists
-	if lhs and default_deleted then
+local function set_keymap(lhs, rhs, opts, metadata, default_deleted)
+	local success = set_keymap_from_node(Trie, lhs, rhs, opts, metadata)
+	if success and lhs and default_deleted then
 		nvim_del_keymap("i", lhs)
 	end
-
-	return true
+	return success
 end
 
-M.insert_imap = insert_imap
+M.set_keymap = set_keymap
 
-local function insert_buf_imap(bufnr, lhs, rhs, opts, metadata)
-	if not bufnr or type(bufnr) ~= "number" then
+--- Insert a mapping into the Trie for a specific buffer.
+--- If the mapping already exists, it will be overwritten.
+--- @param bufnr integer The buffer number to insert the mapping for.
+--- @param lhs string? The left-hand side of the mapping.
+--- @param rhs string|function? The right-hand side of the mapping, can be a function.
+--- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
+--- @param metadata? table Metadata for the mapping, can include additional information.
+--- @param default_deleted? boolean If true, the mapping will be deleted from nvim if it exists.
+--- @return boolean True if the mapping was successfully inserted, false if the bufnr is invalid or lhs is invalid.
+local function buf_set_keymap(bufnr, lhs, rhs, opts, metadata, default_deleted)
+	if type(bufnr) ~= "number" then
 		return false
 	end
 
-	local cb = nil
-	local type_rhs = type(rhs)
-	if type_rhs == "function" then
-		cb = rhs
-		rhs = nil
-	elseif type_rhs ~= "string" then
-		return false
+	local trie_buf = TrieBuf[bufnr]
+	if not trie_buf then
+		trie_buf = {}
+		TrieBuf[bufnr] = trie_buf
 	end
 
-	local analyzed_lhs = analyze_lhs(lhs)
-	if not analyzed_lhs then
-		return false
+	local success = set_keymap_from_node(trie_buf, lhs, rhs, opts, metadata)
+	if success and lhs and default_deleted then
+		nvim_buf_del_keymap(bufnr, "i", lhs)
 	end
+	return success
+end
 
-	local node = TrieBuf[bufnr]
-	if not node then
-		node = {}
-		TrieBuf[bufnr] = node
-	end
+M.buf_set_keymap = buf_set_keymap
 
-	for i = 1, #analyzed_lhs do
-		local ch = analyzed_lhs:sub(i, i)
-		node[ch] = node[ch] or {}
-		node = node[ch]
-	end
-
-	node.command = {
-		mode = "i",
-		callback = cb,
-		lhs = analyzed_lhs,
-		rhs = rhs,
-		opts = opts or {},
-		metadata = metadata or {},
+local build_opts = function(map)
+	return {
+		expr = to_boolean(map.expr),
+		noremap = to_boolean(map.noremap),
+		nowait = to_boolean(map.nowait),
+		silent = to_boolean(map.silent),
+		desc = map.desc,
+		buffer = map.buffer and (map.buffer == 1 and 0 or map.buffer) or nil,
 	}
-
-	return true
 end
 
-M.insert_buf_imap = insert_buf_imap
+local build_meta = function(map)
+	return {
+		lhsraw = map.lhsraw,
+		lhsrawalt = map.lhsrawalt,
+		lnum = map.lnum,
+		mode_bits = map.mode_bits,
+		script = to_boolean(map.script),
+		scriptversion = map.scriptversion,
+		abbr = to_boolean(map.abbr),
+	}
+end
 
-function M.build_trie()
-	for _, map in ipairs(nvim_get_keymap("i")) do
-		local lhs, rhs = map.lhs, map.rhs or map.callback
-
-		insert_imap(lhs, rhs, {
-			expr = to_boolean(map.expr),
-			noremap = to_boolean(map.noremap),
-			nowait = to_boolean(map.nowait),
-			silent = to_boolean(map.silent),
-			desc = map.desc,
-			buffer = map.buffer and (map.buffer == 1 and 0 or map.buffer) or nil,
-		}, {
-			-- lhsraw is replaced termcodes -- by nvim_get_keymap, so we can use it directly
-			lhsraw = map.lhsraw,
-			lhsrawalt = map.lhsrawalt,
-			lnum = map.lnum,
-			mode_bits = map.mode_bits,
-			script = to_boolean(map.script),
-			scriptversion = map.scriptversion,
-			abbr = to_boolean(map.abbr),
-		}, true)
+function M.build_trie(bufnr)
+	if type(bufnr) == "number" then
+		for _, map in ipairs(nvim_buf_get_keymap(bufnr, "i")) do
+			local lhs, rhs = map.lhs, map.rhs or map.callback
+			buf_set_keymap(bufnr, lhs, rhs, build_opts(map), build_meta(map), true)
+		end
+	else
+		for _, map in ipairs(nvim_get_keymap("i")) do
+			local lhs, rhs = map.lhs, map.rhs or map.callback
+			set_keymap(lhs, rhs, build_opts(map), build_meta(map), true)
+		end
 	end
 end
 
 function M.get_trie()
 	return Trie
+end
+
+function M.get_buf_trie(bufnr)
+	if type(bufnr) ~= "number" then
+		return {}
+	end
+	return TrieBuf[bufnr] or {}
 end
 
 function M.remove_mapping(lhs)

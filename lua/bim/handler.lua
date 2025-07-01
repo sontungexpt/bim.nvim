@@ -21,13 +21,13 @@ local M = {}
 
 local TIMEOUTLEN = vim.o.timeoutlen or 300
 local current_seq = {}
-local current_node = trie.get_trie()
+local bcurr_node, curr_node = nil, nil
 local oword, ostart, oend, orow = nil, -1, -1, -1
 local timer = nil
 
 local function reset_state()
 	current_seq = {}
-	current_node = trie.get_trie()
+	bcurr_node, curr_node = nil, nil
 	oword, ostart, oend, orow = nil, -1, -1, -1
 	if timer then
 		timer:stop()
@@ -124,16 +124,23 @@ end
 --- Reset the state of the handler
 --- This function is called when the user leaves the insert mode
 --- @param char string The character that was pressed
-local function process_input_char(char)
+--- @param bufnr integer The buffer number
+local function process_input_char(char, bufnr)
 	current_seq[#current_seq + 1] = char
 
 	--- make sure the current node is not nil
-	if not current_node then
-		current_node = trie.get_trie()
+	if not curr_node then
+		curr_node = trie.get_trie()
 	end
 
-	current_node = current_node[char]
-	if not current_node then
+	if not bcurr_node then
+		bcurr_node = trie.get_buf_trie(bufnr)
+	end
+
+	curr_node = curr_node[char]
+	bcurr_node = bcurr_node[char]
+
+	if not bcurr_node and not curr_node then
 		reset_state()
 		return
 	elseif not oword and #current_seq == 1 then
@@ -154,13 +161,14 @@ end
 --- This function is called when the user has finished typing a sequence
 --- and the command is ready to be executed
 local invoke_mapped_command = function()
-	if not current_node then
+	local priority_node = bcurr_node or curr_node
+	if not priority_node then
 		return
 	end
 
 	if #current_seq == 1 then
 		start_timer(TIMEOUTLEN, function()
-			local curr_cmd = current_node and trie.get_command(current_node)
+			local curr_cmd = priority_node and trie.get_command(priority_node)
 			if curr_cmd then
 				-- if case that parent node also has command so need to wait for timeout
 				-- and if no leaf node then execute the command from parent
@@ -171,13 +179,12 @@ local invoke_mapped_command = function()
 		end)
 	end
 
-	local cmd = trie.get_command(current_node)
+	local cmd = trie.get_command(priority_node)
 	if not cmd then
 		return
-	elseif not trie.has_child(current_node) then
+	elseif not trie.has_child(priority_node) then
 		-- no more child then execute command
 		finalize_and_apply_mapping(cmd)
-		return
 	end
 end
 
@@ -204,7 +211,7 @@ M.setup = function()
 				inserting = true
 				local char = v.char
 				if char:match("^[%w%p ]$") then
-					process_input_char(char)
+					process_input_char(char, args.buf)
 				end
 				return
 			elseif not inserting then
