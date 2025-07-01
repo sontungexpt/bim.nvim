@@ -1,12 +1,15 @@
 local trie = require("bim.trie")
-
+local type = type
 local vim = vim
-local uv, v, api = vim.uv or vim.loop, vim.v, vim.api
+local v, api = vim.v, vim.api
 ---@diagnostic disable-next-line: undefined-field
-local new_timer = uv.new_timer
+local new_timer = (vim.uv or vim.loop).new_timer
 local schedule, schedule_wrap = vim.schedule, vim.schedule_wrap
-local nvim_input, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor, nvim_command =
+local nvim_get_mode, nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor, nvim_command =
+	api.nvim_get_mode,
 	api.nvim_input,
+	api.nvim_eval,
+	api.nvim_replace_termcodes,
 	api.nvim_win_get_cursor,
 	api.nvim_get_current_line,
 	api.nvim_buf_set_text,
@@ -19,16 +22,13 @@ local M = {}
 local TIMEOUTLEN = vim.o.timeoutlen or 300
 local current_seq = {}
 local current_node = trie.get_trie()
-local original_word = nil
+local oword, ostart, oend, orow = nil, -1, -1, -1
 local timer = nil
-local original_s, original_e = -1, -1
-local original_row = -1
-local executed = false
 
-local function reset()
-	executed = false
+local function reset_state()
 	current_seq = {}
 	current_node = trie.get_trie()
+	oword, ostart, oend, orow = nil, -1, -1, -1
 	if timer then
 		timer:stop()
 		timer:close()
@@ -36,26 +36,41 @@ local function reset()
 	end
 end
 
+--- Execute the command associated with the current sequence
+--- @param cmd Command The command to execute_command
 local function execute_command(cmd)
-	if cmd.expr and type(cmd.value) == "function" then
-		local ok, result = pcall(cmd.value)
-		if ok and type(result) == "string" then
-			nvim_input(result)
+	local rhs, callback, opts, metadata = cmd.rhs, cmd.callback, cmd.opts, cmd.metadata
+
+	local output = rhs
+	if callback then
+		output = callback()
+	end
+
+	if opts.expr and type(output) == "string" then
+		output = nvim_eval(output)
+	end
+
+	if type(output) == "string" then
+		if opts.replace_keycodes then
+			if metadata.lhsraw then
+				output = metadata.lhsraw
+			else
+				output = replace_termcodes(output, true, true, true)
+				-- cache the raw lhs for later use
+				metadata.lhsraw = output
+			end
 		end
-	elseif cmd.type == "string" then
-		nvim_input(cmd.value)
-	elseif cmd.type == "command" then
-		nvim_command(cmd.value:sub(2)) -- remove ':'
-	elseif cmd.type == "function" then
-		local ok, result = pcall(cmd.value)
-		if ok and type(result) == "string" then
-			nvim_input(result)
-		end
+		nvim_input(output)
 	end
 end
 
+--- Create a new timer and start ít
+--- @param timeoutlen integer The timeout length in milliseconds
+--- @param cb function The callback function to be called when the timer expires
 local function start_timer(timeoutlen, cb)
-	timer = new_timer()
+	if not timer then
+		timer = new_timer()
+	end
 	return timer:start(timeoutlen, 0, schedule_wrap(cb))
 end
 
@@ -68,43 +83,47 @@ end
 --- @return integer The start position of the word (0-indexed)
 --- @return integer The end position of the word (0-indexed) (exclusive)
 --- @return integer The row of the word (0-indexed)
-local function get_current_word()
+local function get_word_under_cursor()
 	local cursor_pos = nvim_win_get_cursor(0)
-	local col = cursor_pos[2]
-	local row = cursor_pos[1]
+	local col_0based = cursor_pos[2]
+	local row_0based = cursor_pos[1] - 1
 
 	local line = nvim_get_current_line()
 	if line == "" then
-		return nil, col, col + 1, row
+		return nil, col_0based, col_0based + 1, row_0based
 	end
 	-- find the start and end of the word
 	-- by looking for spaces
-	local s = line:sub(1, col):find("[^%s]+$")
+	local s = line:sub(1, col_0based):find("[^%s]+$")
 	if not s then
-		return nil, col, col + 1, row
+		return nil, col_0based, col_0based + 1, row_0based
 	end
 
-	local e = line:find("^%s", col + 1) or (#line + 1)
+	local e = line:find("^%s", col_0based + 1) or (#line + 1)
 
-	return line:sub(s, e - 1), s - 1, e - 1, row - 1
+	return line:sub(s, e - 1), s - 1, e - 1, row_0based
 end
 
-local function restore_cursor_word()
-	local curr_word, s, e, row = get_current_word()
+--- Restore the original word under the cursor
+local function restore_original_word()
+	local curr_word, s, e, row = get_word_under_cursor()
 
-	if not curr_word or row ~= original_row then
+	if not curr_word or row ~= orow then
 		return
-	elseif s == original_s and e == original_e and row == original_row and curr_word == original_word then
+	elseif s == ostart and e == oend and curr_word == oword then
 		return
 	end
-	local rs = min(original_s, s)
-	local re = max(original_e, e)
+	local rs = min(ostart, s)
+	local re = max(oend, e)
 
-	nvim_buf_set_text(0, original_row, rs, original_row, re, { original_word })
-	nvim_win_set_cursor(0, { original_row, original_e })
+	nvim_buf_set_text(0, orow, rs, orow, re, { oword })
+	nvim_win_set_cursor(0, { orow + 1, oend })
 end
 
-local function on_char(char)
+--- Reset the state of the handler
+--- This function is called when the user leaves the insert mode
+--- @param char string The character that was pressed
+local function process_input_char(char)
 	current_seq[#current_seq + 1] = char
 
 	--- make sure the current node is not nil
@@ -113,74 +132,88 @@ local function on_char(char)
 	end
 
 	current_node = current_node[char]
-
 	if not current_node then
-		reset()
+		reset_state()
 		return
-	elseif not original_word or original_word == "" then
-		original_word, original_s, original_e, original_row = get_current_word()
-	end
-
-	if trie.get_command(current_node) then
-		-- promise to execute the command
-		executed = true
+	elseif not oword and #current_seq == 1 then
+		-- if this is the first character of the sequence,
+		oword, ostart, oend, orow = get_word_under_cursor()
 	end
 end
 
-local finalize_mapping_execution = function(cmd)
-	restore_cursor_word()
-	reset()
+local finalize_and_apply_mapping = function(cmd)
+	restore_original_word()
+	reset_state()
 	schedule(function()
 		execute_command(cmd)
 	end)
 end
 
-local execute_mapping = function()
-	if not executed then
+--- Invoke the mapped command based on the current sequence
+--- This function is called when the user has finished typing a sequence
+--- and the command is ready to be executed
+local invoke_mapped_command = function()
+	if not current_node then
 		return
 	end
+
+	if #current_seq == 1 then
+		start_timer(TIMEOUTLEN, function()
+			local curr_cmd = current_node and trie.get_command(current_node)
+			if curr_cmd then
+				-- if case that parent node also has command so need to wait for timeout
+				-- and if no leaf node then execute the command from parent
+				finalize_and_apply_mapping(curr_cmd)
+				return
+			end
+			reset_state()
+		end)
+	end
+
 	local cmd = trie.get_command(current_node)
-
-	-- no more child then execute command
-	if not trie.has_child(current_node) then
-		finalize_mapping_execution(cmd)
+	if not cmd then
+		return
+	elseif not trie.has_child(current_node) then
+		-- no more child then execute command
+		finalize_and_apply_mapping(cmd)
 		return
 	end
-
-	start_timer(TIMEOUTLEN, function()
-		finalize_mapping_execution(cmd)
-	end)
 end
 
+--- Setup the autocmds for the bim handler
 M.setup = function()
 	local autocmd = api.nvim_create_autocmd
 	local group = api.nvim_create_augroup("BimHandler", { clear = true })
 	local inserting = false
 
-	autocmd({ "InsertCharPre", "TextChangedI", "BufLeave", "WinLeave", "CursorMovedI" }, {
+	autocmd({ "BufLeave", "WinLeave", "InsertLeave", "CursorMovedI" }, {
 		group = group,
 		callback = function(args)
-			local event = args.event
-			if event == "BufLeave" or args.event == "WinLeave" then
-				reset()
+			if args.event == "CursorMovedI" and (inserting or nvim_get_mode().mode ~= "i") then
 				return
-			elseif event == "InsertCharPre" then
+			end
+			reset_state()
+		end,
+	})
+
+	autocmd({ "InsertCharPre", "TextChangedI" }, {
+		group = group,
+		callback = function(args)
+			if args.event == "InsertCharPre" then
 				inserting = true
 				local char = v.char
 				if char:match("^[%w%p ]$") then
-					on_char(char)
+					process_input_char(char)
 				end
 				return
 			elseif not inserting then
-				-- if moved cursor in insert mode,
-				-- but not inserting any char,
-				reset()
 				-- remove char
+				reset_state()
 				return
-			elseif event == "TextChangedI" or event == "CursorMovedI" then
-				inserting = false
-				execute_mapping()
 			end
+			-- elseif event == "TextChangedI" or event == "CursorMovedI" then
+			inserting = false
+			invoke_mapped_command()
 		end,
 	})
 end
