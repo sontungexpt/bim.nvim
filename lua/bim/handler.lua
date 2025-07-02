@@ -4,6 +4,7 @@ local vim = vim
 local v, api = vim.v, vim.api
 ---@diagnostic disable-next-line: undefined-field
 local new_timer = (vim.uv or vim.loop).new_timer
+local cursor_move_accepted = false
 local schedule, schedule_wrap = vim.schedule, vim.schedule_wrap
 local nvim_get_mode, nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor, nvim_command =
 	api.nvim_get_mode,
@@ -25,9 +26,15 @@ local bcurr_node, curr_node = nil, nil
 local oword, ostart, oend, orow = nil, -1, -1, -1
 local timer = nil
 
+--- public api for other plugins
+function M.trigger_cursor_move_accepted()
+	cursor_move_accepted = true
+end
+
 local function reset_state()
 	current_seq = {}
-	bcurr_node, curr_node = nil, nil
+	cursor_move_accepted = false
+	bcurr_node, curr_node = nil, trie.get_trie()
 	oword, ostart, oend, orow = nil, -1, -1, -1
 	if timer then
 		timer:stop()
@@ -37,9 +44,9 @@ local function reset_state()
 end
 
 --- Execute the command associated with the current sequence
---- @param cmd Command The command to execute_command
+--- @param cmd Cmd The command to execute_command
 local function execute_command(cmd)
-	local rhs, callback, opts, metadata = cmd.rhs, cmd.callback, cmd.opts or {}, cmd.metadata or {}
+	local rhs, callback, opts = cmd.rhs, cmd.callback, cmd.opts or {}
 
 	local output = rhs
 	if callback then
@@ -55,13 +62,13 @@ local function execute_command(cmd)
 
 	if type(output) == "string" and output ~= "" then
 		if opts.replace_keycodes then
-			local rhsraw = metadata.rhsraw
+			local rhsraw = cmd.rhsraw
 			if rhsraw then
-				output = rhsraw
+				output = cmd.rhsraw
 			else
 				output = replace_termcodes(output, true, true, true)
 				-- cache the raw lhs for later use
-				metadata.rhsraw = output
+				cmd.rhsraw = output
 			end
 		end
 		nvim_input(output)
@@ -197,10 +204,24 @@ M.setup = function()
 	local group = api.nvim_create_augroup("BimHandler", { clear = true })
 	local inserting = false
 
-	autocmd({ "BufLeave", "WinLeave", "InsertLeave", "CursorMovedI" }, {
+	--- core
+	trie.build_trie()
+
+	autocmd({ "BufNew", "BufDelete" }, {
 		group = group,
 		callback = function(args)
-			if args.event == "CursorMovedI" and (inserting or nvim_get_mode().mode ~= "i") then
+			if args.event == "BufDelete" then
+				trie.delete_buf(args.buf)
+			else
+				trie.build_trie(args.buf)
+			end
+		end,
+	})
+
+	autocmd({ "BufLeave", "WinLeave", "InsertLeave" }, {
+		group = group,
+		callback = function(args)
+			if args.event == "CursorMovedI" and (inserting or cursor_move_accepted or nvim_get_mode().mode ~= "i") then
 				return
 			end
 			reset_state()

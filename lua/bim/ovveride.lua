@@ -1,28 +1,19 @@
 local api = vim.api
-local type = type
--- override.lua
-local M = {}
+local keymap = vim.keymap
+local original_get_keymap = api.nvim_get_keymap
+local original_buf_get_keymap = api.nvim_buf_get_keymap
 
---- Check if the mode is insert mode
---- @param mode string or table of strings representing modes
---- @return boolean true if the mode is insert mode, false otherwise
-local function is_insert_mode(mode)
-	if type(mode) == "string" then
-		return mode == "i"
-	elseif type(mode) == "table" then
-		for _, m in ipairs(mode) do
-			if m == "i" then
-				return true
-			end
-		end
-	end
-	return false
-end
+local type = type
+
+local M = {
+	nvim_buf_get_keymap = original_buf_get_keymap,
+	nvim_get_keymap = original_get_keymap,
+	keymap_set = keymap.set,
+	keymap_del = keymap.del,
+}
 
 function M.wrap()
 	local trie = require("bim.trie")
-	local keymap = vim.keymap
-	local original_del = keymap.del
 	local nvim_set_keymap = api.nvim_set_keymap
 	local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 
@@ -78,12 +69,56 @@ function M.wrap()
 	end
 
 	---@diagnostic disable-next-line: duplicate-set-field, unused-local
-	keymap.del = function(mode, lhs, opts)
+	keymap.del = function(modes, lhs, opts)
 		-- original_del(mode, lhs, opts)
-		if is_insert_mode(mode) and trie.remove_mapping(lhs) then
-			return
+		opts = opts or {}
+		--- @cast modes string[]
+		modes = type(modes) == "string" and { modes } or modes
+
+		local buffer = false ---@type false|integer
+		if opts.buffer ~= nil then
+			buffer = opts.buffer == true and 0 or opts.buffer --[[@as integer]]
 		end
-		original_del(mode, lhs, opts)
+
+		if buffer == false then
+			for _, mode in ipairs(modes) do
+				if mode == "i" then
+					if not trie.del_keymap(lhs) then
+						api.nvim_del_keymap(mode, lhs)
+					end
+				else
+					api.nvim_del_keymap(mode, lhs)
+				end
+			end
+		else
+			for _, mode in ipairs(modes) do
+				if mode == "i" then
+					if not trie.del_keymap(lhs) then
+						api.nvim_buf_del_keymap(buffer, mode, lhs)
+					end
+				else
+					api.nvim_buf_del_keymap(buffer, mode, lhs)
+				end
+			end
+		end
+	end
+
+	---@diagnostic disable-next-line: duplicate-set-field
+	api.nvim_buf_get_keymap = function(bufnr, mode)
+		if mode == "i" then
+			return trie.buf_get_keymap(bufnr)
+		else
+			return original_buf_get_keymap(bufnr, mode)
+		end
+	end
+
+	---@diagnostic disable-next-line: duplicate-set-field
+	api.nvim_get_keymap = function(mode)
+		if mode == "i" then
+			return trie.get_keymap()
+		else
+			return original_get_keymap(mode)
+		end
 	end
 end
 
