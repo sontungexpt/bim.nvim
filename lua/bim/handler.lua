@@ -5,7 +5,7 @@ local v, api = vim.v, vim.api
 ---@diagnostic disable-next-line: undefined-field
 local new_timer = (vim.uv or vim.loop).new_timer
 local cursor_move_accepted = false
-local schedule, schedule_wrap = vim.schedule, vim.schedule_wrap
+local schedule, schedule_wrap, defer_fn = vim.schedule, vim.schedule_wrap, vim.defer_fn
 local nvim_get_mode, nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor, nvim_command =
 	api.nvim_get_mode,
 	api.nvim_input,
@@ -23,7 +23,7 @@ local M = {}
 local TIMEOUTLEN = vim.o.timeoutlen or 300
 local current_seq = {}
 local bcurr_node, curr_node = nil, nil
-local oword, ostart, oend, orow = nil, -1, -1, -1
+local oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
 local timer = nil
 
 --- public api for other plugins
@@ -35,7 +35,7 @@ local function reset_state()
 	current_seq = {}
 	cursor_move_accepted = false
 	bcurr_node, curr_node = nil, trie.get_trie()
-	oword, ostart, oend, orow = nil, -1, -1, -1
+	oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
 	if timer then
 		timer:stop()
 		timer:close()
@@ -94,6 +94,7 @@ end
 --- @return integer The start position of the word (0-indexed)
 --- @return integer The end position of the word (0-indexed) (exclusive)
 --- @return integer The row of the word (0-indexed)
+--- @return integer The column of the word (0-indexed)
 local function get_word_under_cursor()
 	local cursor_pos = nvim_win_get_cursor(0)
 	local col_0based = cursor_pos[2]
@@ -101,18 +102,14 @@ local function get_word_under_cursor()
 
 	local line = nvim_get_current_line()
 	if line == "" then
-		return nil, col_0based, col_0based + 1, row_0based
+		return nil, col_0based, col_0based + 1, row_0based, col_0based
 	end
 	-- find the start and end of the word
 	-- by looking for spaces
-	local s = line:sub(1, col_0based):find("[^%s]+$")
-	if not s then
-		return nil, col_0based, col_0based + 1, row_0based
-	end
-
+	local s = line:sub(1, col_0based):find("[^%s]+$") or col_0based + 1
 	local e = line:find("^%s", col_0based + 1) or (#line + 1)
 
-	return line:sub(s, e - 1), s - 1, e - 1, row_0based
+	return line:sub(s, e - 1), s - 1, e - 1, row_0based, col_0based
 end
 
 --- Restore the original word under the cursor
@@ -128,7 +125,7 @@ local function restore_original_word()
 	local re = max(oend, e)
 
 	nvim_buf_set_text(0, orow, rs, orow, re, { oword })
-	nvim_win_set_cursor(0, { orow + 1, oend })
+	nvim_win_set_cursor(0, { orow + 1, ocurpos })
 end
 
 --- Reset the state of the handler
@@ -155,7 +152,7 @@ local function process_input_char(char, bufnr)
 		return
 	elseif not oword and #current_seq == 1 then
 		-- if this is the first character of the sequence,
-		oword, ostart, oend, orow = get_word_under_cursor()
+		oword, ostart, oend, orow, ocurpos = get_word_under_cursor()
 	end
 end
 
@@ -245,7 +242,11 @@ M.setup = function()
 			end
 			-- elseif event == "TextChangedI" or event == "CursorMovedI" then
 			inserting = false
-			invoke_mapped_command()
+
+			-- ensure it will run at last of all autocmd TextChangedI event
+			defer_fn(function()
+				invoke_mapped_command()
+			end, 0)
 		end,
 	})
 end

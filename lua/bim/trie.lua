@@ -1,5 +1,4 @@
 local api = vim.api
-local autocmd, augroup = api.nvim_create_autocmd, api.nvim_create_augroup
 local nvim_del_keymap, nvim_buf_del_keymap = api.nvim_del_keymap, api.nvim_buf_del_keymap
 local nvim_get_keymap, nvim_buf_get_keymap = api.nvim_get_keymap, api.nvim_buf_get_keymap
 local ipairs, type, next = ipairs, type, next
@@ -108,17 +107,9 @@ local BufCmdRef = {
 	-- }
 }
 
-local function delete_buf(bufnr)
+M.delete_buf = function(bufnr)
 	BufTrie[bufnr] = nil
 end
-M.delete_buf = delete_buf
-
-autocmd("BufDelete", {
-	pattern = "*",
-	callback = function(args)
-		delete_buf(args.buf)
-	end,
-})
 
 --- Analyze the left-hand side (lhs) of a mapping.
 --- Supports shift mappings and returns a normalized string.
