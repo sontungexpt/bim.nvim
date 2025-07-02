@@ -376,6 +376,8 @@ local build_keyset_get_keymap = function(command)
 	return {
 		mode = command.mode,
 		lhs = command.lhs,
+		lhsraw = api.nvim_replace_termcodes(command.lhs, true, true, true),
+		lhsrawalt = nil,
 		rhs = command.rhs,
 		expr = tobit(opts.expr),
 		noremap = tobit(opts.noremap),
