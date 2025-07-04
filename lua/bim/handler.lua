@@ -198,14 +198,25 @@ end
 --- Setup the autocmds for the bim handler
 M.setup = function()
 	local autocmd = api.nvim_create_autocmd
-	local group = api.nvim_create_augroup("BimHandler", { clear = true })
+	local NAMESPACE = api.nvim_create_namespace("BimHandler")
+	local GROUP = api.nvim_create_augroup("BimHandler", { clear = true })
+
 	local inserting = false
+	local inserted_char = ""
+
+	local register_onkey = function(cb, opts)
+		vim.on_key(cb, NAMESPACE, opts)
+	end
+
+	local unregister_onkey = function()
+		vim.on_key(nil, NAMESPACE)
+	end
 
 	--- core
 	trie.build_trie()
 
 	autocmd({ "BufNew", "BufDelete" }, {
-		group = group,
+		group = GROUP,
 		callback = function(args)
 			if args.event == "BufDelete" then
 				trie.delete_buf(args.buf)
@@ -216,7 +227,7 @@ M.setup = function()
 	})
 
 	autocmd({ "BufLeave", "WinLeave", "InsertLeave" }, {
-		group = group,
+		group = GROUP,
 		callback = function(args)
 			if args.event == "CursorMovedI" and (inserting or cursor_move_accepted or nvim_get_mode().mode ~= "i") then
 				return
@@ -225,15 +236,41 @@ M.setup = function()
 		end,
 	})
 
+	--- Why not handle all logic in vim.onkey?
+	--- > Because we don't want it change the behavior of InsertCharPre autocmd
+	--- > If handle all on onkey we need to return "" for some case
+	--- and it will break the InsertCharPre autocmd
+	api.nvim_create_autocmd({ "InsertEnter", "InsertLeave" }, {
+		group = GROUP,
+		callback = function(args)
+			local event, bufnr = args.event, args.buf
+			if event == "InsertEnter" then
+				---@diagnostic disable-next-line: unused-local
+				register_onkey(function(key, typed)
+					if not api.nvim_buf_is_valid(bufnr) then
+						return
+					end
+
+					if key:match("^[%w%p ]$") then
+						process_input_char(key, bufnr)
+						inserted_char = key
+					end
+				end)
+			else
+				-- unregister the key handler
+				unregister_onkey()
+			end
+		end,
+	})
 	autocmd({ "InsertCharPre", "TextChangedI" }, {
-		group = group,
+		group = GROUP,
 		callback = function(args)
 			if args.event == "InsertCharPre" then
-				inserting = true
-				local char = v.char
-				if char:match("^[%w%p ]$") then
-					process_input_char(char, args.buf)
-				end
+				inserting = inserted_char == v.char
+				-- local char = v.char
+				-- if char:match("^[%w%p ]$") then
+				-- 	process_input_char(char, args.buf)
+				-- end
 				return
 			elseif not inserting then
 				-- remove char
