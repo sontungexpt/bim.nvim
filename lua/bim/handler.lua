@@ -203,6 +203,12 @@ M.setup = function()
 
 	local inserting = false
 	local inserted_char = ""
+	local working_bufnr = -1
+
+	local reset_vars = function()
+		inserted_char = ""
+		working_bufnr = -1
+	end
 
 	local register_onkey = function(cb, opts)
 		vim.on_key(cb, NAMESPACE, opts)
@@ -243,18 +249,10 @@ M.setup = function()
 	api.nvim_create_autocmd({ "InsertEnter", "InsertLeave" }, {
 		group = GROUP,
 		callback = function(args)
-			local event, bufnr = args.event, args.buf
-			if event == "InsertEnter" then
+			if args.event == "InsertEnter" then
 				---@diagnostic disable-next-line: unused-local
 				register_onkey(function(key, typed)
-					if not api.nvim_buf_is_valid(bufnr) then
-						return
-					end
-
-					if key:match("^[%w%p ]$") then
-						process_input_char(key, bufnr)
-						inserted_char = key
-					end
+					inserted_char = key
 				end)
 			else
 				-- unregister the key handler
@@ -266,15 +264,23 @@ M.setup = function()
 		group = GROUP,
 		callback = function(args)
 			if args.event == "InsertCharPre" then
-				inserting = inserted_char == v.char
-				-- local char = v.char
-				-- if char:match("^[%w%p ]$") then
-				-- 	process_input_char(char, args.buf)
-				-- end
+				if inserted_char == v.char then
+					working_bufnr = args.buf
+					inserting = true
+
+					if inserted_char:match("^[%w%p ]$") then
+						process_input_char(inserted_char, args.buf)
+					end
+				end
+				return
+			elseif working_bufnr ~= args.buf then
+				reset_state()
+				reset_vars()
 				return
 			elseif not inserting then
 				-- remove char
 				reset_state()
+				reset_vars()
 				return
 			end
 			-- elseif event == "TextChangedI" or event == "CursorMovedI" then
@@ -284,6 +290,7 @@ M.setup = function()
 			defer_fn(function()
 				invoke_mapped_command()
 			end, 0)
+			reset_vars()
 		end,
 	})
 end
