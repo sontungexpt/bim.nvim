@@ -23,6 +23,7 @@ local M = {}
 local TIMEOUTLEN = vim.o.timeoutlen or 300
 local current_seq = {}
 local bcurr_node, curr_node = nil, nil
+local omodified = false -- the old modifided state of buffer
 local oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
 local timer = nil
 
@@ -34,6 +35,7 @@ end
 local function reset_state()
 	current_seq = {}
 	cursor_move_accepted = false
+	omodified = false
 	bcurr_node, curr_node = nil, trie.get_trie()
 	oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
 	if timer then
@@ -174,23 +176,28 @@ local function process_input_char(char, bufnr)
 		reset_state()
 		return
 	elseif not oword and #current_seq == 1 then
+		omodified = api.nvim_get_option_value("modified", { buf = bufnr })
 		-- if this is the first character of the sequence,
 		oword, ostart, oend, orow, ocurpos = get_word_under_cursor()
 	end
 end
 
-local finalize_and_apply_mapping = function(cmd)
+local finalize_and_apply_mapping = function(cmd, bufnr)
 	restore_original_word()
 	reset_state()
 	schedule(function()
 		execute_command(cmd)
+		if not omodified and api.nvim_buf_is_valid(bufnr) then
+			api.nvim_set_option_value("modified", false, { buf = bufnr })
+		end
 	end)
 end
 
 --- Invoke the mapped command based on the current sequence
 --- This function is called when the user has finished typing a sequence
 --- and the command is ready to be executed
-local invoke_mapped_command = function()
+--- @param bufnr integer The buffer number
+local invoke_mapped_command = function(bufnr)
 	local priority_node = bcurr_node or curr_node
 	if not priority_node then
 		return
@@ -202,7 +209,7 @@ local invoke_mapped_command = function()
 			if curr_cmd then
 				-- if case that parent node also has command so need to wait for timeout
 				-- and if no leaf node then execute the command from parent
-				finalize_and_apply_mapping(curr_cmd)
+				finalize_and_apply_mapping(curr_cmd, bufnr)
 				return
 			end
 			reset_state()
@@ -214,7 +221,7 @@ local invoke_mapped_command = function()
 		return
 	elseif not trie.has_child(priority_node) then
 		-- no more child then execute command
-		finalize_and_apply_mapping(cmd)
+		finalize_and_apply_mapping(cmd, bufnr)
 	end
 end
 
@@ -311,7 +318,7 @@ M.setup = function()
 
 			-- ensure it will run at last of all autocmd TextChangedI event
 			defer_fn(function()
-				invoke_mapped_command()
+				invoke_mapped_command(args.buf)
 			end, 0)
 			reset_vars()
 		end,
