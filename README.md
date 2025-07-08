@@ -31,3 +31,17 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
   end
 }
 ```
+
+## 🛠️ How to use
+
+1. **Install the plugin** using your preferred Neovim package manager.
+2. **Maps by vim.keymap.set**
+3. **Enter insert mode** and start typing. The plugin will echo your keys in real time.
+
+## 📜 License
+
+This project is licensed under the **Apache Licence 2.0** [LICENCE](./LICENSE)
+
+```
+
+```
