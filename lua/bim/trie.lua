@@ -3,9 +3,9 @@ local nvim_del_keymap, nvim_buf_del_keymap = api.nvim_del_keymap, api.nvim_buf_d
 local nvim_get_keymap, nvim_buf_get_keymap = api.nvim_get_keymap, api.nvim_buf_get_keymap
 local ipairs, type, next = ipairs, type, next
 local tbl_concat = table.concat
+
 local utils = require("bim.utils")
-local to_boolean = utils.to_boolean
-local tobit = utils.tobit
+local to_boolean, tobit = utils.to_boolean, utils.tobit
 
 local SHIFT_PATTERN = "^((<S%-[zxcvbnm,%.%/asdfghjkl;'qwertyuiop%[%]\\`1234567891%-=]>)+)$"
 local SHIFT_MAP = {
@@ -109,6 +109,7 @@ local BufCmdRef = {
 
 M.delete_buf = function(bufnr)
 	BufTrie[bufnr] = nil
+	BufCmdRef[bufnr] = nil
 end
 
 --- Analyze the left-hand side (lhs) of a mapping.
@@ -226,6 +227,7 @@ M.set_keymap = set_keymap
 --- @return boolean True if the mapping was successfully inserted, false if the bufnr is invalid or lhs is invalid.
 local function buf_set_keymap(bufnr, lhs, rhs, opts, metadata, default_deleted)
 	if type(bufnr) ~= "number" then
+		error("bufnr must be a number")
 		return false
 	end
 
@@ -239,7 +241,13 @@ local function buf_set_keymap(bufnr, lhs, rhs, opts, metadata, default_deleted)
 	if not node then
 		return false
 	end
+
 	local buf_cmd_ref = BufCmdRef[bufnr]
+	if not buf_cmd_ref then
+		buf_cmd_ref = {}
+		BufCmdRef[bufnr] = buf_cmd_ref
+	end
+
 	buf_cmd_ref[node] = node.command
 
 	if lhs and default_deleted then
@@ -296,7 +304,10 @@ function M.get_trie()
 end
 
 function M.get_buf_trie(bufnr)
-	return type(bufnr) == "number" and BufTrie[bufnr] or {}
+	if type(bufnr) ~= "number" then
+		error("bufnr must be a number")
+	end
+	return BufTrie[bufnr] or {}
 end
 
 local function trie_unmap(trie, cmdref, lhs)
@@ -327,6 +338,7 @@ local function trie_unmap(trie, cmdref, lhs)
 
 	-- remove the command if it exists
 	node.command = nil
+	cmdref[node] = nil
 
 	-- clean up the path if there are no more commands
 	for i = #path, 1, -1 do
@@ -335,7 +347,6 @@ local function trie_unmap(trie, cmdref, lhs)
 		local n = parent[key]
 		if next(n) == nil then
 			--- remove node
-			cmdref[n] = nil
 			parent[key] = nil
 		else
 			break
@@ -376,9 +387,10 @@ local build_keyset_get_keymap = function(command)
 	return {
 		mode = command.mode,
 		lhs = command.lhs,
-		lhsraw = api.nvim_replace_termcodes(command.lhs, true, true, true),
-		lhsrawalt = nil,
+		lhsraw = metadata.lhsraw or api.nvim_replace_termcodes(command.lhs, true, true, true),
+		lhsrawalt = metadata.lhsrawalt or nil,
 		rhs = command.rhs,
+		callback = command.callback,
 		expr = tobit(opts.expr),
 		noremap = tobit(opts.noremap),
 		nowait = tobit(opts.nowait),
@@ -402,7 +414,7 @@ end
 
 M.buf_get_keymap = function(bufnr)
 	if type(bufnr) ~= "number" then
-		return {}
+		error("bufnr must be a number")
 	end
 
 	local maps = nvim_buf_get_keymap(bufnr, "i")

@@ -43,35 +43,58 @@ local function reset_state()
 	end
 end
 
+local execute_normal_command = function(cmd)
+	local rhs, callback, opts = cmd.rhs, cmd.callback, cmd.opts or {}
+	if callback then
+		callback()
+		return
+	elseif not rhs then
+		return
+	elseif opts.replace_keycodes then
+		local rhsraw = cmd.rhsraw
+		if rhsraw then
+			rhs = cmd.rhsraw
+		else
+			rhs = replace_termcodes(rhs, true, true, true)
+			-- cache the raw lhs for later use
+			cmd.rhsraw = rhs
+		end
+	end
+	nvim_input(rhs)
+end
+
+--- Execute the expression command
+--- This function evaluates the expression and executes the command
+--- @param cmd Cmd The command to execute_expression_command
+local execute_expression_command = function(cmd)
+	local rhs, callback, opts = cmd.rhs, cmd.callback, cmd.opts or {}
+	if callback then
+		rhs = callback()
+	elseif not rhs then
+		return
+	end
+
+	if type(rhs) == "string" then
+		rhs = nvim_eval(rhs)
+	end
+
+	if type(rhs) == "string" and rhs ~= "" then
+		if opts.replace_keycodes then
+			rhs = replace_termcodes(rhs, true, true, true)
+		end
+		-- cache the raw lhs for later use
+		nvim_input(rhs)
+	end
+end
+
 --- Execute the command associated with the current sequence
 --- @param cmd Cmd The command to execute_command
 local function execute_command(cmd)
-	local rhs, callback, opts = cmd.rhs, cmd.callback, cmd.opts or {}
-
-	local output = rhs
-	if callback then
-		output = callback()
-		if not opts.expr then
-			return
-		end
-	end
-
-	if opts.expr and type(output) == "string" then
-		output = nvim_eval(output)
-	end
-
-	if type(output) == "string" and output ~= "" then
-		if opts.replace_keycodes then
-			local rhsraw = cmd.rhsraw
-			if rhsraw then
-				output = cmd.rhsraw
-			else
-				output = replace_termcodes(output, true, true, true)
-				-- cache the raw lhs for later use
-				cmd.rhsraw = output
-			end
-		end
-		nvim_input(output)
+	local opts = cmd.opts or {}
+	if not opts.expr then
+		execute_normal_command(cmd)
+	else
+		execute_expression_command(cmd)
 	end
 end
 
@@ -218,7 +241,7 @@ M.setup = function()
 		vim.on_key(nil, NAMESPACE)
 	end
 
-	--- core
+	--- bụild global trie
 	trie.build_trie()
 
 	autocmd({ "BufNew", "BufDelete" }, {
