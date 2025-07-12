@@ -25,9 +25,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "sontungexpt/bim.nvim",
   event = "InsertEnter",
-  config = function()
-    require("bim").setup()
-  end
+  opts = {},
 }
 ```
 
