@@ -7,7 +7,7 @@ local tbl_concat = table.concat
 local utils = require("bim.utils")
 local to_boolean, tobit = utils.to_boolean, utils.tobit
 
-local SHIFT_PATTERN = "^((<S%-[zxcvbnm,%.%/asdfghjkl;'qwertyuiop%[%]\\`1234567891%-=]>)+)$"
+local SHIFT_PATTERN = "^((<[Ss]%-[zxcvbnm,%.%/asdfghjkl;'qwertyuiop%[%]\\`1234567891%-=]>)+)$"
 local SHIFT_MAP = {
 	["a"] = "A",
 	["b"] = "B",
@@ -112,6 +112,32 @@ M.delete_buf = function(bufnr)
 	BufCmdRef[bufnr] = nil
 end
 
+local analyze_shift_group = function(lhs)
+	local shift_match = lhs:match(SHIFT_PATTERN)
+	if not shift_match then
+		return nil
+	end
+	local result = {}
+	local gt_pos = 1 -- skip the first '<'
+	local count = 0
+
+	while true do
+		gt_pos = gt_pos + 1
+		gt_pos = shift_match:find(">", gt_pos)
+		if not gt_pos then
+			break
+		end
+		count = count + 1
+		result[count] = SHIFT_MAP[shift_match:sub(gt_pos - 1, gt_pos - 1)]
+	end
+
+	if count < 2 then
+		return nil
+	end
+
+	return tbl_concat(result, "")
+end
+
 --- Analyze the left-hand side (lhs) of a mapping.
 --- Supports shift mappings and returns a normalized string.
 --- If the lhs is not a valid mapping, returns nil.
@@ -125,31 +151,7 @@ local function analyze_lhs(lhs)
 		-- though if only one it eval immediately and no need to manage
 		return nil
 	elseif lhs:sub(1, 1) == "<" then
-		-- check if a shift mapping
-		local match = lhs:match(SHIFT_PATTERN)
-		if not match then
-			return nil
-		end
-
-		local result = {}
-		local gt_pos = 1 -- skip the first '<'
-		local count = 0
-
-		while true do
-			gt_pos = gt_pos + 1
-			gt_pos = match:find(">", gt_pos)
-			if not gt_pos then
-				break
-			end
-			count = count + 1
-			result[count] = SHIFT_MAP[match:sub(gt_pos - 1, gt_pos - 1)]
-		end
-
-		if count < 2 then
-			return nil
-		end
-
-		return tbl_concat(result, "")
+		return analyze_shift_group(lhs)
 	end
 
 	return lhs:match("^[%w%p ]+$")

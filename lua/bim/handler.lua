@@ -50,7 +50,7 @@ local execute_normal_command = function(cmd)
 	if callback then
 		callback()
 		return
-	elseif not rhs then
+	elseif not rhs or rhs == "" then
 		return
 	elseif opts.replace_keycodes then
 		local rhsraw = cmd.rhsraw
@@ -72,19 +72,42 @@ local execute_expression_command = function(cmd)
 	local rhs, callback, opts = cmd.rhs, cmd.callback, cmd.opts or {}
 	if callback then
 		rhs = callback()
-	elseif not rhs then
+	end
+
+	--- Validate the expression result
+	--- @param str string? The string to validate
+	--- @return boolean True if the string is valid, false otherwise
+	local function validate_string(str)
+		if type(str) ~= "string" then
+			vim.notify(
+				"Bim: Expression command returned an invalid value: " .. tostring(str),
+				vim.log.levels.ERROR,
+				{ title = "Bim" }
+			)
+			return false
+		end
+		return true
+	end
+
+	if not validate_string(rhs) then
+		-- need to show error message
+		return
+	elseif rhs == "" then
+		-- just do nothing
 		return
 	end
 
-	if type(rhs) == "string" then
-		rhs = nvim_eval(rhs)
+	---@cast rhs string
+	rhs = nvim_eval(rhs)
+	if not validate_string(rhs) then
+		return
+	elseif rhs == "" then
+		return
 	end
 
-	if type(rhs) == "string" and rhs ~= "" then
-		if opts.replace_keycodes then
-			rhs = replace_termcodes(rhs, true, true, true)
-		end
-		-- cache the raw lhs for later use
+	if opts.replace_keycodes then
+		nvim_input(replace_termcodes(rhs, true, true, true))
+	else
 		nvim_input(rhs)
 	end
 end
@@ -93,10 +116,10 @@ end
 --- @param cmd Cmd The command to execute_command
 local function execute_command(cmd)
 	local opts = cmd.opts or {}
-	if not opts.expr then
-		execute_normal_command(cmd)
-	else
+	if opts.expr then
 		execute_expression_command(cmd)
+	else
+		execute_normal_command(cmd)
 	end
 end
 
@@ -235,11 +258,6 @@ M.setup = function()
 	local inserted_char = ""
 	local working_bufnr = -1
 
-	local reset_vars = function()
-		inserted_char = ""
-		working_bufnr = -1
-	end
-
 	local register_onkey = function(cb, opts)
 		vim.on_key(cb, NAMESPACE, opts)
 	end
@@ -276,7 +294,7 @@ M.setup = function()
 	--- > Because we don't want it change the behavior of InsertCharPre autocmd
 	--- > If handle all on onkey we need to return "" for some case
 	--- and it will break the InsertCharPre autocmd
-	api.nvim_create_autocmd({ "InsertEnter", "InsertLeave" }, {
+	autocmd({ "InsertEnter", "InsertLeave" }, {
 		group = GROUP,
 		callback = function(args)
 			if args.event == "InsertEnter" then
@@ -300,27 +318,25 @@ M.setup = function()
 
 					if inserted_char:match("^[%w%p ]$") then
 						process_input_char(inserted_char, args.buf)
+					else
+						reset_state()
 					end
 				end
 				return
 			elseif working_bufnr ~= args.buf then
 				reset_state()
-				reset_vars()
 				return
 			elseif not inserting then
 				-- remove char
 				reset_state()
-				reset_vars()
 				return
 			end
-			-- elseif event == "TextChangedI" or event == "CursorMovedI" then
 			inserting = false
 
 			-- ensure it will run at last of all autocmd TextChangedI event
 			defer_fn(function()
 				invoke_mapped_command(args.buf)
 			end, 0)
-			reset_vars()
 		end,
 	})
 end
