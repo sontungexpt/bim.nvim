@@ -300,7 +300,7 @@ M.setup = function()
 			if args.event == "InsertEnter" then
 				---@diagnostic disable-next-line: unused-local
 				register_onkey(function(key, typed)
-					inserted_char = key
+					inserted_char = typed
 				end)
 			else
 				-- unregister the key handler
