@@ -4,7 +4,6 @@ local vim = vim
 local v, api = vim.v, vim.api
 ---@diagnostic disable-next-line: undefined-field
 local new_timer = (vim.uv or vim.loop).new_timer
-local cursor_move_accepted = false
 local schedule, schedule_wrap, defer_fn = vim.schedule, vim.schedule_wrap, vim.defer_fn
 local nvim_get_mode, nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor, nvim_command =
 	api.nvim_get_mode,
@@ -27,14 +26,8 @@ local omodified = false -- the old modifided state of buffer
 local oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
 local timer = nil
 
---- public api for other plugins
-function M.trigger_cursor_move_accepted()
-	cursor_move_accepted = true
-end
-
 local function reset_state()
 	current_seq = {}
-	cursor_move_accepted = false
 	omodified = false
 	bcurr_node, curr_node = nil, trie.get_trie()
 	oword, ostart, oend, orow, ocurpos = nil, -1, -1, -1, -1
@@ -283,7 +276,7 @@ M.setup = function()
 	autocmd({ "BufLeave", "WinLeave", "InsertLeave" }, {
 		group = GROUP,
 		callback = function(args)
-			if args.event == "CursorMovedI" and (inserting or cursor_move_accepted or nvim_get_mode().mode ~= "i") then
+			if args.event == "CursorMovedI" and (inserting or nvim_get_mode().mode ~= "i") then
 				return
 			end
 			reset_state()

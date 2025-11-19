@@ -16,7 +16,6 @@
 
 https://github.com/user-attachments/assets/7320d380-7360-45d9-84bd-c110dd3401ff
 
-
 ## 📦 Installation
 
 With [lazy.nvim](https://github.com/folke/lazy.nvim):
