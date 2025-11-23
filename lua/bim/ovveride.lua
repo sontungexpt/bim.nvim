@@ -22,7 +22,7 @@ function M.wrap()
 		---@cast mode string[]
 		mode = type(mode) == "string" and { mode } or mode
 
-		opts = vim.deepcopy(opts)
+		opts = vim.deepcopy(opts or {}, true)
 
 		if opts.expr and opts.replace_keycodes ~= false then
 			opts.replace_keycodes = true
