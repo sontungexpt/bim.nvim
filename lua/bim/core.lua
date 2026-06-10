@@ -4,8 +4,7 @@ local vim = vim
 local v, api = vim.v, vim.api
 local new_timer = (vim.uv or vim.loop).new_timer
 local schedule, schedule_wrap, defer_fn = vim.schedule, vim.schedule_wrap, vim.defer_fn
-local nvim_get_mode, nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor =
-	api.nvim_get_mode,
+local nvim_input, nvim_eval, replace_termcodes, nvim_win_get_cursor, nvim_get_current_line, nvim_buf_set_text, nvim_win_set_cursor =
 	api.nvim_input,
 	api.nvim_eval,
 	api.nvim_replace_termcodes,
@@ -142,6 +141,7 @@ end
 local function finalize_and_apply_mapping(cmd, bufnr)
 	restore_original_word()
 	reset_state()
+
 	schedule(function()
 		execute_command(cmd)
 		if not omodified and api.nvim_buf_is_valid(bufnr) then
@@ -208,7 +208,8 @@ M.setup = function()
 		vim.on_key(nil, NAMESPACE)
 	end
 
-	-- store must be built by core.setup(); only rebuild on buffer events
+	-- init once
+	store.build(nil)
 
 	autocmd({ "BufNew", "BufDelete" }, {
 		group = GROUP,
@@ -224,9 +225,6 @@ M.setup = function()
 	autocmd({ "BufLeave", "WinLeave", "InsertLeave" }, {
 		group = GROUP,
 		callback = function(args)
-			if args.event == "CursorMovedI" and (inserting or nvim_get_mode().mode ~= "i") then
-				return
-			end
 			reset_state()
 		end,
 	})

@@ -154,20 +154,43 @@ local function add_prefix_counts(prefix_tbl, seq, delta)
 	end
 end
 
+-- Build command object: capture more metadata for compatibility.
 local function build_cmd(seq, rhs, opts, metadata)
 	local cb
 	if type(rhs) == "function" then
 		cb = rhs
 		rhs = nil
 	end
+
 	opts = opts or {}
+	metadata = metadata or {}
+
 	return {
 		mode = "i",
 		lhs = seq,
 		rhs = rhs,
 		callback = cb or opts.callback,
-		opts = opts,
-		metadata = metadata or {},
+
+		opts = {
+			expr = opts.expr,
+			noremap = opts.noremap,
+			nowait = opts.nowait,
+			silent = opts.silent,
+			desc = opts.desc,
+			replace_keycodes = opts.replace_keycodes,
+		},
+
+		metadata = {
+			sid = metadata.sid or 0,
+			lhsraw = metadata.lhsraw,
+			lhsrawalt = metadata.lhsrawalt,
+			lnum = metadata.lnum or 0,
+			script = metadata.script or 0,
+			scriptversion = metadata.scriptversion or 0,
+			abbr = metadata.abbr or 0,
+			buffer = metadata.buffer or 0,
+			replace_keycodes = opts.replace_keycodes or false,
+		},
 	}
 end
 
@@ -180,7 +203,9 @@ end
 --- @param take_ownership? boolean Remove the original Neovim keymap after importing.
 ---
 --- @return boolean success True if the mapping was accepted.
-function M.add(lhs, rhs, opts, bufnr, take_ownership)
+-- Add mapping. bufnr == nil => global. take_ownership: if true, remove the
+-- original nvim keymap (default true)
+function M.add(lhs, rhs, opts, bufnr, take_ownership, metadata)
 	take_ownership = take_ownership == nil and true or take_ownership
 	local seq = analyze_lhs(lhs)
 	if not seq then
@@ -200,10 +225,10 @@ function M.add(lhs, rhs, opts, bufnr, take_ownership)
 	local existed = map_tbl[seq] ~= nil
 	if not existed then
 		add_prefix_counts(pref_tbl, seq, 1)
-		pref_tbl[""] = (pref_tbl[""] or 0)
+		pref_tbl[""] = (pref_tbl[""] or 0) + 1
 	end
 
-	map_tbl[seq] = build_cmd(seq, rhs, opts)
+	map_tbl[seq] = build_cmd(seq, rhs, opts, metadata)
 
 	if take_ownership then
 		if type(bufnr) == "number" then
@@ -249,20 +274,33 @@ function M.remove(lhs, bufnr)
 	end
 end
 
--- Build store from existing nvim mappings. If bufnr is provided build for
--- that buffer only. take_ownership controls whether we delete the original
--- nvim mappings (default: true)
-local function build_opts(map)
+local function build_meta(map)
 	return {
-		expr = to_boolean(map.expr),
-		noremap = to_boolean(map.noremap),
-		nowait = to_boolean(map.nowait),
-		silent = to_boolean(map.silent),
-		desc = map.desc,
+		sid = map.sid or 0,
+		lhsraw = map.lhsraw or api.nvim_replace_termcodes(map.lhs or "", true, true, true),
+		lhsrawalt = map.lhsrawalt,
+		lnum = map.lnum or 0,
+		script = map.script or 0,
+		scriptversion = map.scriptversion or 0,
+		buffer = map.buffer or map.buf or 0,
+		abbr = map.abbr or 0,
 	}
 end
 
---- Rebuild internal storage from existing Neovim keymaps.
+local function build_opts(map)
+	return {
+		expr = to_boolean(map.expr),
+		noremap = map.noremap == nil and true or to_boolean(map.noremap),
+		nowait = to_boolean(map.nowait),
+		silent = to_boolean(map.silent),
+		desc = map.desc,
+		replace_keycodes = map.replace_keycodes,
+	}
+end
+
+--- Build store from existing nvim mappings. If bufnr is provided build for
+--- that buffer only. take_ownership controls whether we delete the original
+--- nvim mappings (default: true)
 ---
 --- Existing state for the target scope is discarded.
 ---
@@ -275,14 +313,14 @@ function M.build(bufnr, take_ownership)
 		BufPrefix[bufnr] = {}
 		BufPrefix[bufnr][""] = 0
 		for _, map in ipairs(nvim_buf_get_keymap(bufnr, "i")) do
-			M.add(map.lhs, map.rhs or map.callback, build_opts(map), bufnr, take_ownership)
+			M.add(map.lhs, map.rhs or map.callback, build_opts(map), bufnr, take_ownership, build_meta(map))
 		end
 	else
 		GlobalMap = {}
 		GlobalPrefix = {}
 		GlobalPrefix[""] = 0
 		for _, map in ipairs(nvim_get_keymap("i")) do
-			M.add(map.lhs, map.rhs or map.callback, build_opts(map), nil, take_ownership)
+			M.add(map.lhs, map.rhs or map.callback, build_opts(map), nil, take_ownership, build_meta(map))
 		end
 	end
 end
@@ -395,26 +433,31 @@ function M.delete_buf(bufnr)
 end
 
 -- helpers to return mappings in nvim's `get_keymap` format
-local function build_keymap_entry(cmd)
+local function build_keymap_entry(cmd, bufnr)
 	local metadata = cmd.metadata or {}
 	local opts = cmd.opts or {}
+
 	return {
 		mode = cmd.mode,
 		lhs = cmd.lhs,
 		lhsraw = metadata.lhsraw or api.nvim_replace_termcodes(cmd.lhs, true, true, true),
-		lhsrawalt = metadata.lhsrawalt or nil,
+		lhsrawalt = metadata.lhsrawalt,
 		rhs = cmd.rhs,
 		callback = cmd.callback,
 		expr = tobit(opts.expr),
-		noremap = tobit(opts.noremap),
+		noremap = opts.noremap ~= false and 1 or 0,
 		nowait = tobit(opts.nowait),
 		silent = tobit(opts.silent),
 		desc = opts.desc,
-		buffer = metadata.buffer or 0,
-		lnum = metadata.lnum or 0,
+		sid = metadata.sid or 0,
 		script = metadata.script or 0,
 		scriptversion = metadata.scriptversion or 0,
-		abbr = metadata.abbr or 0,
+		abbr = tobit(metadata.abbr),
+		lnum = metadata.lnum or 0,
+		buf = bufnr or 0,
+		buffer = metadata.buffer or 0,
+		replace_keycodes = tobit(metadata.replace_keycodes),
+		mode_bits = 16,
 	}
 end
 
@@ -426,11 +469,6 @@ function M.get_keymap()
 	return maps
 end
 
---- Get effective buffer-local mappings in Neovim keymap format.
----
---- @param bufnr integer Buffer number.
----
---- @return table[]
 function M.buf_get_keymap(bufnr)
 	if type(bufnr) ~= "number" then
 		error("bufnr must be a number")
@@ -441,7 +479,7 @@ function M.buf_get_keymap(bufnr)
 		return maps
 	end
 	for _, cmd in pairs(tbl) do
-		maps[#maps + 1] = build_keymap_entry(cmd)
+		maps[#maps + 1] = build_keymap_entry(cmd, bufnr)
 	end
 	return maps
 end
