@@ -70,9 +70,9 @@ local M = {}
 --- @field opts.expr? boolean -- if true, the rhs is evaluated as an expression
 --- @field metadata table -- additional metadata for the mapping, can include:
 ---
---- @class TrieNode
+--- @class KeymapTrie
 --- @field command? Cmd -- the command associated with this node, if any
---- @field [string] TrieNode
+--- @field [string] KeymapTrie
 local GTrie = {
 	-- ["a"] = {
 	--   ["b"] = {
@@ -81,7 +81,7 @@ local GTrie = {
 }
 
 --- @class BufTrieNode
---- @field [integer] TrieNode
+--- @field [integer] KeymapTrie
 local BufTrie = {
 	-- [bufnr] = {
 	--   ["a"] = {
@@ -92,7 +92,7 @@ local BufTrie = {
 }
 
 --- @class CmdRef
---- @field [TrieNode] Cmd -- a reference to the command associated with this node, if any
+--- @field [KeymapTrie] Cmd -- a reference to the command associated with this node, if any
 
 --- @type CmdRef
 local GCmdRef = {}
@@ -106,6 +106,30 @@ local BufCmdRef = {
 	--   }
 	-- }
 }
+
+local KeymapTrie = {
+	[0] = {},
+}
+local GlobalKeymapTrie = KeymapTrie[0]
+
+local au = nil
+setmetatable(KeymapTrie, {
+	__index = function(trie, buf_id)
+		local new = setmetatable({}, {
+			__index = GlobalKeymapTrie,
+		})
+		trie[buf_id] = new
+
+		au = au
+			or api.nvim_create_autocmd("BufDelete", {
+				callback = function(args)
+					trie[buf_id] = nil
+				end,
+			})
+
+		return new
+	end,
+})
 
 M.delete_buf = function(bufnr)
 	BufTrie[bufnr] = nil
@@ -159,12 +183,12 @@ end
 
 --- Insert a mapping into the Trie from a node.
 --- If the mapping already exists, it will be overwritten.
---- @param node TrieNode The node to insert the mapping into.
+--- @param node KeymapTrie The node to insert the mapping into.
 --- @param lhs string? The left-hand side of the mapping.
 --- @param rhs string|function? The right-hand side of the mapping, can be a function.
 --- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
 --- @param metadata? table Metadata for the mapping, can include additional information.
---- @return TrieNode|nil The node where the mapping was inserted, or nil if the lhs is invalid.
+--- @return KeymapTrie|nil The node where the mapping was inserted, or nil if the lhs is invalid.
 local function set_keymap_from_node(node, lhs, rhs, opts, metadata)
 	local cb = nil
 	local type_rhs = type(rhs)
@@ -206,7 +230,7 @@ end
 --- @param opts? vim.keymap.set.Opts:vim.api.keyset.keymap Optional options for the mapping.
 --- @return boolean True if the mapping was successfully inserted, false if the lhs is invalid.
 local function set_keymap(lhs, rhs, opts, metadata, default_deleted)
-	local node = set_keymap_from_node(GTrie, lhs, rhs, opts, metadata)
+	local node = set_keymap_from_node(GlobalKeymapTrie, lhs, rhs, opts, metadata)
 	if not node then
 		return false
 	end
@@ -302,7 +326,7 @@ function M.build_trie(bufnr)
 end
 
 function M.get_trie()
-	return GTrie
+	return GlobalKeymapTrie
 end
 
 function M.get_buf_trie(bufnr)
@@ -362,7 +386,7 @@ function M.buf_del_keymap(bufnr, lhs)
 end
 
 function M.del_keymap(lhs)
-	return trie_unmap(GTrie, GCmdRef, lhs)
+	return trie_unmap(GlobalKeymapTrie, GCmdRef, lhs)
 end
 
 function M.has_command(node)

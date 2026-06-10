@@ -1,11 +1,8 @@
 local M = {}
 
-function M.setup()
-	local handler = require("bim.handler")
-	local override = require("bim.ovveride")
-
-	handler.setup()
-	override.wrap()
+M.setup = function()
+	require("bim.handler").setup()
+	require("bim.ovveride").wrap()
 end
 
 return M
