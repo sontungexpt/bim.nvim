@@ -1,7 +1,7 @@
 local type = type
 local M = {}
 
-function M.to_boolean(value)
+M.to_boolean = function(value)
 	if value == nil then
 		return false
 	elseif type(value) == "boolean" then
@@ -13,7 +13,7 @@ function M.to_boolean(value)
 	end
 end
 
-function M.tobit(value)
+M.tobit = function(value)
 	if value == nil then
 		return 0
 	elseif type(value) == "boolean" then
@@ -28,10 +28,11 @@ end
 --- Check if the mode is insert mode
 --- @param mode string or table of strings representing modes
 --- @return boolean true if the mode is insert mode, false otherwise
-function M.is_insert_mode(mode)
-	if type(mode) == "string" then
+M.is_insert_mode = function(mode)
+	local t = type(mode)
+	if t == "string" then
 		return mode == "i"
-	elseif type(mode) == "table" then
+	elseif t == "table" then
 		for _, m in ipairs(mode) do
 			if m == "i" then
 				return true

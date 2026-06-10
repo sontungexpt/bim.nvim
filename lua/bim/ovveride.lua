@@ -13,7 +13,7 @@ local M = {
 }
 
 function M.wrap()
-	local trie = require("bim.trie")
+	local store = require("bim.store")
 	local nvim_set_keymap = api.nvim_set_keymap
 	local nvim_buf_set_keymap = api.nvim_buf_set_keymap
 
@@ -47,7 +47,7 @@ function M.wrap()
 			opts.buffer = nil ---@type integer?
 			for _, m in ipairs(mode) do
 				if m == "i" then
-					if not trie.buf_set_keymap(bufnr, lhs, rhs, opts) then
+					if not store.add(lhs, rhs, opts, bufnr) then
 						nvim_buf_set_keymap(bufnr, m, lhs, rhs, opts)
 					end
 				else
@@ -58,7 +58,7 @@ function M.wrap()
 			opts.buffer = nil
 			for _, m in ipairs(mode) do
 				if m == "i" then
-					if not trie.set_keymap(lhs, rhs, opts) then
+					if not store.add(lhs, rhs, opts) then
 						nvim_set_keymap(m, lhs, rhs, opts)
 					end
 				else
@@ -83,7 +83,7 @@ function M.wrap()
 		if buffer == false then
 			for _, mode in ipairs(modes) do
 				if mode == "i" then
-					if not trie.del_keymap(lhs) then
+					if not store.remove(lhs) then
 						api.nvim_del_keymap(mode, lhs)
 					end
 				else
@@ -93,7 +93,7 @@ function M.wrap()
 		else
 			for _, mode in ipairs(modes) do
 				if mode == "i" then
-					if not trie.del_keymap(lhs) then
+					if not store.remove(lhs, buffer) then
 						api.nvim_buf_del_keymap(buffer, mode, lhs)
 					end
 				else
@@ -106,7 +106,7 @@ function M.wrap()
 	---@diagnostic disable-next-line: duplicate-set-field
 	api.nvim_buf_get_keymap = function(bufnr, mode)
 		if mode == "i" then
-			return trie.buf_get_keymap(bufnr)
+			return store.buf_get_keymap(bufnr)
 		else
 			return original_buf_get_keymap(bufnr, mode)
 		end
@@ -115,7 +115,7 @@ function M.wrap()
 	---@diagnostic disable-next-line: duplicate-set-field
 	api.nvim_get_keymap = function(mode)
 		if mode == "i" then
-			return trie.get_keymap()
+			return store.get_keymap()
 		else
 			return original_get_keymap(mode)
 		end
