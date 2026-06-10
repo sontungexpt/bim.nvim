@@ -313,14 +313,20 @@ function M.build(bufnr, take_ownership)
 		BufPrefix[bufnr] = {}
 		BufPrefix[bufnr][""] = 0
 		for _, map in ipairs(nvim_buf_get_keymap(bufnr, "i")) do
-			M.add(map.lhs, map.rhs or map.callback, build_opts(map), bufnr, take_ownership, build_meta(map))
+			local rhs = map.rhs or map.callback
+			if rhs then
+				M.add(map.lhs, rhs, build_opts(map), bufnr, take_ownership, build_meta(map))
+			end
 		end
 	else
 		GlobalMap = {}
 		GlobalPrefix = {}
 		GlobalPrefix[""] = 0
 		for _, map in ipairs(nvim_get_keymap("i")) do
-			M.add(map.lhs, map.rhs or map.callback, build_opts(map), nil, take_ownership, build_meta(map))
+			local rhs = map.rhs or map.callback
+			if rhs then
+				M.add(map.lhs, rhs, build_opts(map), nil, take_ownership, build_meta(map))
+			end
 		end
 	end
 end
@@ -445,7 +451,7 @@ local function build_keymap_entry(cmd, bufnr)
 		rhs = cmd.rhs,
 		callback = cmd.callback,
 		expr = tobit(opts.expr),
-		noremap = opts.noremap ~= false and 1 or 0,
+		noremap = tobit(opts.noremap),
 		nowait = tobit(opts.nowait),
 		silent = tobit(opts.silent),
 		desc = opts.desc,
