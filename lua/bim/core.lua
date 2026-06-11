@@ -234,7 +234,6 @@ M.setup = function()
 		callback = function(args)
 			if args.event == "InsertEnter" then
 				register_onkey(function(key, typed)
-					typing = true
 					inserted_char = typed
 				end)
 			else
